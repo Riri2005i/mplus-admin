@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M+ Analyses – لوحة الإدارة</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{--bg:#0d0d10;--card:#1a1a20;--line:#2b2b35;--p:#8b5cf6;--p2:#6d28d9;--t:#f2f2f7;--m:#9a9aa8;--r:#ef4444;--g:#22c55e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font-family:Tahoma,Arial,sans-serif;font-size:15px}
+button,input,select,textarea{font:inherit;color:var(--t)}
+input,select,textarea{width:100%;background:#111116;border:1px solid var(--line);border-radius:10px;padding:10px;margin:4px 0 10px}
+input[type=checkbox]{width:auto;margin-left:8px}
+button{background:var(--p);border:0;border-radius:10px;padding:9px 14px;cursor:pointer}
+button.s{background:#2b2b35}button.d{background:var(--r)}button.g{background:var(--g)}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header b{color:var(--p);font-size:18px}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;background:#121217;border-bottom:1px solid var(--line)}
+nav button{background:#1f1f27;white-space:nowrap;padding:8px 12px}nav button.on{background:var(--p)}
+main{padding:14px;max-width:1000px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+.stat b{display:block;font-size:26px;color:var(--p)}.stat span{color:var(--m);font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.item{border-bottom:1px solid var(--line);padding:10px 0}.item:last-child{border:0}
+.m{color:var(--m);font-size:13px}
+.modal{position:fixed;inset:0;background:#000b;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:14px;z-index:20}
+.modal>div{background:var(--card);border-radius:16px;padding:16px;width:100%;max-width:560px}
+#login{max-width:380px;margin:12vh auto;padding:20px}
+.tag{display:inline-block;background:#2b2b35;border-radius:8px;padding:2px 8px;font-size:12px;margin-left:4px}
+</style>
+</head>
+<body>
+<div id="login" class="card" style="display:none">
+  <h2 style="color:var(--p);text-align:center">M+ Analyses</h2>
+  <p class="m" style="text-align:center">لوحة الإدارة – Medical Laboratory Education</p>
+  <input id="em" type="email" placeholder="البريد الإلكتروني" dir="ltr">
+  <input id="pw" type="password" placeholder="كلمة المرور" dir="ltr">
+  <button style="width:100%" onclick="login()">تسجيل الدخول</button>
+  <p id="lerr" style="color:var(--r)"></p>
+</div>
+<div id="app" style="display:none">
+  <header><b>M+ Analyses</b><button class="s" onclick="logout()">خروج</button></header>
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+<div id="modal" class="modal" style="display:none"><div id="mbox"></div></div>
+
+<script>
+const URL_='https://bihuibwjjlvbdzppfnjd.supabase.co';
+const KEY='sb_publishable_uSQuyTIIa3SoQX3921H3LQ_y8_Gy-N8';
+const sb=supabase.createClient(URL_,KEY);
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let cache={};
+
+const ST={t:'stages',l:'name'}, SU={t:'subjects',l:'name'};
+const STATUS=[['draft','مسودة'],['published','منشور']];
+const E={
+ stages:{label:'المراحل',ord:'sort_order',asc:true,cols:['name','sort_order'],fields:[['name','اسم المرحلة','t'],['sort_order','الترتيب','n']]},
+ subjects:{label:'المواد',ord:'sort_order',asc:true,cols:['name','stage_id'],fields:[['name','اسم المادة','t'],['stage_id','المرحلة','s',ST],['description','الوصف','a'],['sort_order','الترتيب','n']]},
+ lectures:{label:'المحاضرات',ord:'created_at',cols:['title','subject_id','status'],fields:[['title','عنوان المحاضرة','t'],['stage_id','المرحلة','s',ST],['subject_id','المادة','s',SU],['lecture_number','رقم المحاضرة','n'],['description','الوصف','a'],['pdf_path','ملف PDF','f','lectures'],['video_url','رابط فيديو','t'],['image_url','صورة توضيحية','f','images'],['allow_download','السماح بالتنزيل','c'],['is_new','تمييز كجديد','c'],['status','الحالة','s',STATUS],['publish_at','تاريخ النشر','d']],def:{status:'published',is_new:true}},
+ announcements:{label:'التبليغات',ord:'created_at',cols:['title','type','target_stage_id'],fields:[['title','العنوان','t'],['body','النص','a'],['type','النوع','s',[['general','إعلان عام'],['new_lecture','محاضرة جديدة'],['new_exam','امتحان جديد'],['content_update','تحديث المحتوى'],['important','تنبيه مهم'],['course','دورة تعليمية'],['maintenance','صيانة/تحديث']]],['target_stage_id','الفئة المستهدفة (فارغ = الجميع)','s',ST],['image_url','صورة (اختياري)','f','images'],['publish_at','وقت النشر','d']],note:'التبليغ يظهر داخل التطبيق فور وقت النشر. الإشعارات الفورية (Push) تُفعّل في مرحلة Firebase.'},
+ exams:{label:'الاختبارات',ord:'created_at',cols:['title','subject_id','status'],fields:[['title','عنوان الاختبار','t'],['stage_id','المرحلة','s',ST],['subject_id','المادة','s',SU],['question_count','عدد الأسئلة','n'],['duration_minutes','الوقت (دقيقة)','n'],['randomize','ترتيب عشوائي','c'],['status','الحالة','s',STATUS]],def:{status:'published',randomize:true,question_count:10,duration_minutes:15}},
+ questions:{label:'الأسئلة',ord:'created_at',cols:['question_text','exam_id'],fields:[['exam_id','الاختبار','s',{t:'exams',l:'title'}],['question_text','نص السؤال','a'],['options','الخيارات','o'],['correct_index','رقم الإجابة الصحيحة','s',[[0,'الخيار 1'],[1,'الخيار 2'],[2,'الخيار 3'],[3,'الخيار 4']]],['explanation','شرح الإجابة','a']]},
+ lab_tests:{label:'الموسوعة',ord:'created_at',cols:['name_en','abbreviation','section_id'],fields:[['section_id','القسم','s',{t:'lab_sections',l:'name_en'}],['name_en','الاسم العلمي','t'],['name_ar','الاسم بالعربية','t'],['abbreviation','الاختصار','t'],['sample_type','نوع العينة','t'],['purpose','الغرض من التحليل','a'],['principle','مبدأ الفحص','a'],['method','طريقة القياس','a'],['uses','الاستخدامات','a'],['high_causes','أسباب الارتفاع','a'],['low_causes','أسباب الانخفاض','a'],['notes','ملاحظات علمية','a'],['sources','المصادر والمراجع','a']]},
+ reference_ranges:{label:'المعدلات',ord:'id',cols:['test_id','value_text','unit'],fields:[['test_id','التحليل','s',{t:'lab_tests',l:'name_en'}],['value_text','القيمة المرجعية','t'],['unit','الوحدة','t'],['age_group','الفئة العمرية','t'],['sex','الجنس','t'],['notes','ملاحظات','a'],['source','المصدر (مطلوب للتوثيق)','t']]}
+};
+const NAV=[['dash','الإحصائيات'],['students','الطلاب'],...Object.entries(E).map(([k,v])=>[k,v.label])];
+
+async function login(){
+  $('#lerr').textContent='';
+  const {error}=await sb.auth.signInWithPassword({email:$('#em').value.trim(),password:$('#pw').value});
+  if(error){$('#lerr').textContent='بيانات الدخول غير صحيحة';return}
+  init();
+}
+async function logout(){await sb.auth.signOut();location.reload()}
+async function init(){
+  const {data:{user}}=await sb.auth.getUser();
+  if(!user){$('#login').style.display='block';$('#app').style.display='none';return}
+  const {data:p}=await sb.from('profiles').select('role,is_active').eq('id',user.id).single();
+  if(!p||p.role!=='admin'||!p.is_active){await sb.auth.signOut();$('#login').style.display='block';$('#lerr').textContent='هذا الحساب ليس حساب مدير';return}
+  $('#login').style.display='none';$('#app').style.display='block';
+  $('#nav').innerHTML=NAV.map(([k,l])=>`<button id="n_${k}" onclick="go('${k}')">${l}</button>`).join('');
+  go('dash');
+}
+function go(k){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.id==='n_'+k));
+  if(k==='dash')dash();else if(k==='students')students();else list(k);
+}
+async function dash(){
+  const {data,error}=await sb.rpc('admin_stats');
+  if(error){$('#main').innerHTML='<div class="card">تعذر تحميل الإحصائيات</div>';return}
+  const s=data,L=[['الطلاب','students'],['حسابات جديدة (7 أيام)','new_students_7d'],['المحاضرات','lectures'],['المواد','subjects'],['الاختبارات','exams'],['مرات فتح المحاضرات','lecture_views']];
+  $('#main').innerHTML=`<div class="grid">${L.map(([l,k])=>`<div class="stat"><b>${s[k]}</b><span>${l}</span></div>`).join('')}</div>
+  <div class="card" style="margin-top:12px"><b>أكثر المواد مشاهدة</b>${(s.top_subjects||[]).map(x=>`<div class="item row"><span>${esc(x.name)}</span><span class="tag">${x.views}</span></div>`).join('')||'<p class="m">لا توجد بيانات بعد</p>'}</div>`;
+}
+async function students(){
+  const {data,error}=await sb.from('profiles').select('*').eq('role','student').order('created_at',{ascending:false});
+  const st=await lookup(ST);
+  if(error){$('#main').innerHTML='<div class="card">تعذر التحميل</div>';return}
+  window._stu=data;
+  $('#main').innerHTML=`<div class="card"><div class="row"><b>الطلاب (${data.length})</b></div><input id="q" placeholder="بحث بالاسم أو البريد" oninput="fs()"><div id="sl"></div></div>`;
+  window._st=st;fs();
+}
+function fs(){
+  const q=($('#q').value||'').toLowerCase();
+  $('#sl').innerHTML=window._stu.filter(s=>(s.full_name+' '+s.email).toLowerCase().includes(q)).map(s=>`<div class="item"><div class="row"><b>${esc(s.full_name)}</b><span class="tag" style="background:${s.is_active?'#14532d':'#7f1d1d'}">${s.is_active?'فعّال':'معطّل'}</span></div>
+  <div class="m" dir="ltr" style="text-align:right">${esc(s.email)}</div><div class="m">${esc(s.university||'-')} • ${esc(window._st[s.stage_id]||'-')} • ${esc(s.department||'-')}</div>
+  <div style="margin-top:6px"><button class="${s.is_active?'s':'g'}" onclick="tog('${s.id}',${!s.is_active})">${s.is_active?'تعطيل':'تفعيل'}</button> <button class="d" onclick="delu('${s.id}')">حذف</button></div></div>`).join('')||'<p class="m">لا يوجد طلاب</p>';
+}
+async function tog(id,v){const {error}=await sb.from('profiles').update({is_active:v}).eq('id',id);if(error)alert('فشل التحديث');students()}
+async function delu(id){if(!confirm('سيتم حذف الحساب وكل بياناته نهائياً. متأكد؟'))return;const {error}=await sb.rpc('admin_delete_user',{uid:id});if(error)alert('فشل الحذف');students()}
+
+async function lookup(src){
+  if(Array.isArray(src))return Object.fromEntries(src.map(([v,l])=>[v,l]));
+  const k=src.t;if(!cache[k])cache[k]=(await sb.from(src.t).select('id,'+src.l).order(src.l)).data||[];
+  return Object.fromEntries(cache[k].map(r=>[r.id,r[src.l]]));
+}
+async function list(k){
+  const e=E[k];
+  const {data,error}=await sb.from(k).select('*').order(e.ord,{ascending:!!e.asc});
+  if(error){$('#main').innerHTML='<div class="card">تعذر التحميل: '+esc(error.message)+'</div>';return}
+  const maps={};for(const c of e.cols){const f=e.fields.find(f=>f[0]===c);if(f&&f[2]==='s')maps[c]=await lookup(f[3])}
+  window._d=data;window._k=k;window._m=maps;
+  $('#main').innerHTML=`<div class="card"><div class="row"><b>${e.label} (${data.length})</b><button onclick="openForm()">+ إضافة</button></div>${e.note?`<p class="m">${e.note}</p>`:''}<input id="q" placeholder="بحث" oninput="fl()"><div id="ll"></div></div>`;
+  fl();
+}
+function fl(){
+  const e=E[window._k],q=($('#q').value||'').toLowerCase();
+  $('#ll').innerHTML=window._d.filter(r=>JSON.stringify(r).toLowerCase().includes(q)).map(r=>`<div class="item"><div class="row"><b>${esc(r[e.cols[0]])}</b><span>${e.cols.slice(1).map(c=>`<span class="tag">${esc(window._m[c]?window._m[c][r[c]]??'الجميع':r[c]??'-')}</span>`).join('')}</span></div>
+  <div style="margin-top:6px"><button class="s" onclick="openForm('${r.id}')">تعديل</button> <button class="d" onclick="del('${r.id}')">حذف</button></div></div>`).join('')||'<p class="m">لا يوجد محتوى بعد</p>';
+}
+async function openForm(id){
+  const k=window._k,e=E[k],row=id?window._d.find(r=>r.id===id):{...(e.def||{})};
+  let h=`<h3>${id?'تعديل':'إضافة'} – ${e.label}</h3>`;
+  for(const [key,label,type,x] of e.fields){
+    const v=row[key];h+=`<label>${label}</label>`;
+    if(type==='t')h+=`<input id="f_${key}" value="${esc(v)}">`;
+    else if(type==='a')h+=`<textarea id="f_${key}" rows="3">${esc(v)}</textarea>`;
+    else if(type==='n')h+=`<input id="f_${key}" type="number" value="${esc(v)}">`;
+    else if(type==='c')h+=`<div><input id="f_${key}" type="checkbox" ${v?'checked':''}></div>`;
+    else if(type==='d'){const dv=v?new Date(new Date(v)-new Date(v).getTimezoneOffset()*6e4).toISOString().slice(0,16):'';h+=`<input id="f_${key}" type="datetime-local" value="${dv}">`}
+    else if(type==='s'){const m=await lookup(x);h+=`<select id="f_${key}"><option value="">—</option>${Object.entries(m).map(([a,b])=>`<option value="${esc(a)}" ${String(v)===String(a)?'selected':''}>${esc(b)}</option>`).join('')}</select>`}
+    else if(type==='f')h+=`<input id="f_${key}" type="file" ${x==='images'?'accept="image/*"':'accept="application/pdf"'}>${v?`<div class="m">يوجد ملف محفوظ (اترك الحقل فارغاً للإبقاء عليه)</div>`:''}`;
+    else if(type==='o'){const o=v||['','','',''];h+=[0,1,2,3].map(i=>`<input id="f_${key}${i}" placeholder="الخيار ${i+1}" value="${esc(o[i])}">`).join('')}
+  }
+  h+=`<div class="row"><button onclick="save('${id||''}')">حفظ</button><button class="s" onclick="closeM()">إلغاء</button></div><p id="ferr" style="color:var(--r)"></p>`;
+  $('#mbox').innerHTML=h;$('#modal').style.display='flex';
+}
+function closeM(){$('#modal').style.display='none'}
+async function save(id){
+  const k=window._k,e=E[k],o={};
+  $('#ferr').textContent='جارٍ الحفظ...';
+  try{
+    for(const [key,label,type,x] of e.fields){
+      const el=$('#f_'+key);
+      if(type==='c')o[key]=el.checked;
+      else if(type==='n')o[key]=el.value===''?null:Number(el.value);
+      else if(type==='d')o[key]=el.value?new Date(el.value).toISOString():null;
+      else if(type==='s'){let v=el.value;o[key]=v===''?null:(k==='questions'&&key==='correct_index'?Number(v):v)}
+      else if(type==='o')o[key]=[0,1,2,3].map(i=>$('#f_'+key+i).value.trim()).filter(Boolean);
+      else if(type==='f'){
+        const f=el.files[0];if(!f)continue;
+        const path=Date.now()+'_'+f.name.replace(/[^\w.\-]/g,'_');
+        const {error}=await sb.storage.from(x).upload(path,f);if(error)throw error;
+        o[key]=x==='images'?sb.storage.from('images').getPublicUrl(path).data.publicUrl:path;
+      }else o[key]=el.value.trim()||null;
+    }
+    if(k==='questions'&&(o.options.length<2||o.correct_index==null||o.correct_index>=o.options.length))throw new Error('أدخل خيارين على الأقل وحدد إجابة صحيحة ضمن الخيارات');
+    const r=id?await sb.from(k).update(o).eq('id',id):await sb.from(k).insert(o);
+    if(r.error)throw r.error;
+    cache={};closeM();list(k);
+  }catch(err){$('#ferr').textContent='خطأ: '+(err.message||err)}
+}
+async function del(id){
+  if(!confirm('تأكيد الحذف؟'))return;
+  const {error}=await sb.from(window._k).delete().eq('id',id);
+  if(error)alert('فشل الحذف: '+error.message);cache={};list(window._k);
+}
+init();
+</script>
+</body>
+</html>
